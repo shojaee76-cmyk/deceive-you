@@ -1018,7 +1018,7 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
   function logLine(who, text) {
     var li = document.createElement('li');
     li.dataset.who = who;
-    var em = document.createElement('em'); em.textContent = who === 'HOLMES' ? 'HOLMES' : 'FIELDER';
+    var em = document.createElement('em'); em.textContent = who;
     var sp = document.createElement('span'); sp.textContent = text;
     li.appendChild(em); li.appendChild(sp);
     logEl.appendChild(li);
@@ -1092,6 +1092,8 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
       document.body.classList.remove('is-lying', 'is-stamped');
       setMeter(0);
       logLine('FIELDER', 'Good chat.');
+      logLine('HOLMES', 'I am always being real.');
+      logLine('EXHIBIT', 'four counts of wire fraud, January 2022. 135 months. Bryan, Texas.');
       $('#track').textContent = 'idle';
       if (idx >= LINES.length) { $('#next').firstChild.nodeValue = 'Run it again '; }
     }, 3500);
