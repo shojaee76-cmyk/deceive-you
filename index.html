@@ -866,7 +866,7 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
   }
 
   var raf = 0;
-  function loop() {
+  function tickAnim() {
     var t = gazeTarget();
     var g = fielderTarget();
     gaze.x += (t.x - gaze.x) * 0.14;
@@ -881,8 +881,8 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
       c.state.dilate += ((c.targetDilate || 1) * (holding && c === holmes ? 1.14 : 1) - c.state.dilate) * 0.1;
       c.el.style.setProperty('--dilate', c.state.dilate.toFixed(3));
     });
-    raf = requestAnimationFrame(loop);
   }
+  function loop() { tickAnim(); raf = requestAnimationFrame(loop); }
   if (!REDUCE) { raf = requestAnimationFrame(loop); }
   else {
     // reduced motion: snap the eyes to the target on demand instead of animating every frame
@@ -894,6 +894,9 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
       fielder.el.style.setProperty('--iy', g.y.toFixed(2) + 'px');
     }, { passive: true });
   }
+  // a slow timer drives the same tick as a backstop: requestAnimationFrame stops being serviced in
+  // some headless and background-tab situations, and a frozen gaze is a bug the user would see
+  setInterval(tickAnim, 50);
 
   // ------------------------------------------------------------------ blinking
   function blink(c, cb) {
@@ -981,7 +984,7 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
   }
 
   // ------------------------------------------------------------------ conversation
-  var idx = 0, pct = 0, typing = false, autoTimer = null, auto = false;
+  var idx = 0, pct = 0, targetPct = 0, typing = false, autoTimer = null, auto = false;
   var lineEl = $('#line'), whoEl = $('#who'), logEl = $('#log'), caretEl = $('#caret');
 
   function setLine(text) { lineEl.textContent = text; }
@@ -1034,18 +1037,18 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
   }
   function climbMeter(target) {
     var from = pct, t0 = performance.now(), dur = REDUCE ? 1 : 620;
-    function step(now) {
-      var k = Math.min(1, (now - t0) / dur);
+    // interval-driven on purpose: the climb must finish even where rAF is throttled, because the
+    // stamp only fires at the end of it
+    var tid = setInterval(function () {
+      var k = Math.min(1, (performance.now() - t0) / dur);
       if (k >= 1) {
-        setMeter(target);                       // snap: an eased frame can land at 99.99896
+        clearInterval(tid);
+        setMeter(target);                       // snap: an eased frame can land at 99.43896
         if (target >= 100) { stamp(); }
         return;
       }
-      var e = 1 - Math.pow(1 - k, 3);
-      setMeter(from + (target - from) * e);
-      requestAnimationFrame(step);
-    }
-    requestAnimationFrame(step);
+      setMeter(from + (target - from) * (1 - Math.pow(1 - k, 3)));
+    }, 33);
   }
 
   function applyMood(face, mood) {
@@ -1068,7 +1071,8 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
     if (idx > 1) { logLine(LINES[idx - 2].who, LINES[idx - 2].text); }
     typeLine(L.text, face, function () {
       if (L.meter) {
-        climbMeter(pct + L.meter);
+        targetPct = Math.min(100, targetPct + L.meter);
+        climbMeter(targetPct);
         if (soundOn) beep(260 + pct * 4, 0.05, 0.16);
       } else if (soundOn) {
         beep(180, 0.03, 0.12);
@@ -1080,7 +1084,10 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
     if (auto) { clearTimeout(autoTimer); autoTimer = setTimeout(advance, REDUCE ? 2600 : 5200); }
   }
 
+  var stamping = false;
   function stamp() {
+    if (stamping) { return; }
+    stamping = true;
     document.body.classList.add('is-lying', 'is-stamped');
     holmes.el.classList.add('is-lie');
     thud();
@@ -1091,16 +1098,18 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
       st.classList.remove('is-on');
       document.body.classList.remove('is-lying', 'is-stamped');
       setMeter(0);
+      targetPct = 0;
       logLine('FIELDER', 'Good chat.');
       logLine('HOLMES', 'I am always being real.');
       logLine('EXHIBIT', 'four counts of wire fraud, January 2022. 135 months. Bryan, Texas.');
       $('#track').textContent = 'idle';
       if (idx >= LINES.length) { $('#next').firstChild.nodeValue = 'Run it again '; }
+      stamping = false;
     }, 3500);
   }
 
   function restart() {
-    idx = 0; typing = false; holding = false;
+    idx = 0; typing = false; holding = false; targetPct = 0;
     logEl.innerHTML = '';
     setMeter(0);
     $('#lines').textContent = '0';
@@ -1152,9 +1161,10 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
   // hold the stare raises the meter continuously
   setInterval(function () {
     if (!holding) return;
-    setMeter(Math.min(100, pct + 0.55));
+    targetPct = Math.min(100, targetPct + 0.55);
+    setMeter(Math.max(pct, targetPct));
     if (soundOn && Math.random() < 0.25) { beep(320 + pct * 5, 0.03, 0.1); }
-    if (pct >= 100) { holdStop(); }
+    if (targetPct >= 100) { holdStop(); stamp(); }
   }, 90);
 
   // the whisper: if you stop touching anything, she says it again
@@ -1277,7 +1287,7 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
     frameXml: function () { return new XMLSerializer().serializeToString(buildFrameSvg()); },
     state: function () {
       return {
-        idx: idx, pct: pct, typing: typing, holding: holding, soundOn: soundOn, auto: auto,
+        idx: idx, pct: pct, targetPct: targetPct, typing: typing, holding: holding, soundOn: soundOn, auto: auto,
         blinks: holmes.blinks + fielder.blinks,
         holmesMouth: holmes.el.dataset.mouth, fielderMouth: fielder.el.dataset.mouth,
         lid: holmes.el.style.getPropertyValue('--lid'),
