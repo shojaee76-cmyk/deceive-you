@@ -1036,10 +1036,14 @@ body.is-staring .faces { filter: saturate(.9) contrast(1.06) brightness(.96); }
     var from = pct, t0 = performance.now(), dur = REDUCE ? 1 : 620;
     function step(now) {
       var k = Math.min(1, (now - t0) / dur);
+      if (k >= 1) {
+        setMeter(target);                       // snap: an eased frame can land at 99.99896
+        if (target >= 100) { stamp(); }
+        return;
+      }
       var e = 1 - Math.pow(1 - k, 3);
       setMeter(from + (target - from) * e);
-      if (k < 1) requestAnimationFrame(step);
-      else if (pct >= 100) stamp();
+      requestAnimationFrame(step);
     }
     requestAnimationFrame(step);
   }
